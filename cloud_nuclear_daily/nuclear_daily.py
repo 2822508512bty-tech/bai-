@@ -4,6 +4,7 @@ import html
 import json
 import os
 import smtplib
+import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from urllib.parse import urlencode
@@ -62,8 +63,17 @@ def fetch_news(start: datetime, end: datetime) -> list[dict[str, str]]:
             "startdatetime": gdelt_time(start),
             "enddatetime": gdelt_time(end),
         }
-        response = requests.get(f"{GDELT_ENDPOINT}?{urlencode(params)}", timeout=30)
-        response.raise_for_status()
+        url = f"{GDELT_ENDPOINT}?{urlencode(params)}"
+        try:
+            response = requests.get(url, timeout=30)
+            if response.status_code == 429:
+                time.sleep(12)
+                response = requests.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            print(f"Warning: skipped {topic} news fetch: {exc}")
+            time.sleep(3)
+            continue
         for article in response.json().get("articles", []):
             title = str(article.get("title") or "").strip()
             url = str(article.get("url") or "").strip()
@@ -83,6 +93,7 @@ def fetch_news(start: datetime, end: datetime) -> list[dict[str, str]]:
                     "snippet": str(article.get("snippet") or "")[:500],
                 }
             )
+        time.sleep(3)
     return items[:60]
 
 
