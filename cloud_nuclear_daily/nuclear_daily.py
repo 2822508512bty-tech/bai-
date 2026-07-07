@@ -111,17 +111,68 @@ editor_note。
 候选新闻：
 {json.dumps(news, ensure_ascii=False)[:45000]}
 """
-    client = OpenAI(api_key=env("OPENAI_API_KEY"))
-    response = client.responses.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip(),
-        input=prompt,
-        temperature=0.2,
-    )
-    text = response.output_text.strip()
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return json.loads(text[text.find("{") : text.rfind("}") + 1])
+        client = OpenAI(api_key=env("OPENAI_API_KEY"))
+        response = client.responses.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip(),
+            input=prompt,
+            temperature=0.2,
+        )
+        text = response.output_text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return json.loads(text[text.find("{") : text.rfind("}") + 1])
+    except Exception as exc:
+        print(f"Warning: OpenAI report generation failed; using fallback summary: {exc}")
+        return fallback_report(news, report_date)
+
+
+def fallback_report(news: list[dict[str, str]], report_date: str) -> dict:
+    by_topic = {topic: [] for topic in TOPICS}
+    for item in news:
+        by_topic.setdefault(item.get("topic", "其他"), []).append(item)
+
+    def topic_text(topic: str) -> str:
+        items = by_topic.get(topic) or []
+        if not items:
+            return "公开新闻源暂未抓取到高相关更新。"
+        titles = "；".join(item.get("title", "") for item in items[:2])
+        return f"抓取到 {len(items)} 条相关更新，重点包括：{titles}"
+
+    detail_news = []
+    for item in news[:8]:
+        detail_news.append(
+            {
+                "title": item.get("title", ""),
+                "date": item.get("published", report_date),
+                "region_actor": item.get("source", "公开来源"),
+                "topic": item.get("topic", ""),
+                "summary": item.get("snippet") or item.get("title", ""),
+                "impact": "建议持续跟踪该事项对供应链、项目进度、技术路线或燃料循环能力建设的影响。",
+                "source_name": item.get("source", "来源"),
+                "source_url": item.get("url", ""),
+            }
+        )
+
+    return {
+        "executive_summary": f"{report_date} 自动抓取到 {len(news)} 条核能产业相关新闻。OpenAI 智能摘要暂不可用，本邮件采用备用新闻汇总版，保留来源链接便于复核。",
+        "sections": {
+            "uranium": topic_text("铀资源开发"),
+            "nuclear_power": topic_text("核电技术研发"),
+            "fusion": topic_text("核聚变技术"),
+            "fuel_cycle": topic_text("核燃料循环"),
+        },
+        "signals": [
+            {"label": "供给信号", "text": topic_text("铀资源开发")},
+            {"label": "技术信号", "text": topic_text("核电技术研发")},
+            {"label": "前沿信号", "text": topic_text("核聚变技术")},
+            {"label": "产业链信号", "text": topic_text("核燃料循环")},
+        ],
+        "watch_list": [item.get("title", "") for item in news[:5]],
+        "news": detail_news,
+        "editor_note": "本期为备用汇总模式：自动检索与邮件发送已完成，但 OpenAI API 当前额度不足，未生成深度研判文本。",
+    }
 
 
 def esc(value) -> str:
